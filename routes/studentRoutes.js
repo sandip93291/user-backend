@@ -6,7 +6,7 @@ const { authRequired, requireRole } = require('../middleware/authMiddleware');
 const router = express.Router();
 
 // Student sees their own profile only
-router.get('/user/:id', authRequired, requireRole('student'), async (req, res) => {
+router.get('/users/:id', authRequired, requireRole('student'), async (req, res) => {
     const { id } = req.params;
     console.log('Fetching user with id:', id);
 

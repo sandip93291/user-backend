@@ -19,7 +19,7 @@ router.post('/approve/faculty/:facultyId', authRequired, requireRole('admin'), a
 });
 
 // Admin: Create admin / faculty / student (full CRUD allowed for admin)
-router.post('/user', authRequired, requireRole('admin'), async (req, res) => {
+router.post('/users', authRequired, requireRole('admin'), async (req, res) => {
     const { name, email, mobile, password, role, approved } = req.body;
     const bcrypt = require('bcrypt');
     const SALT_ROUNDS = 10;
@@ -39,7 +39,7 @@ router.post('/user', authRequired, requireRole('admin'), async (req, res) => {
     }
 });
 
-router.put('/user/:id', authRequired, requireRole('admin'), async (req, res) => {
+router.put('/users/:id', authRequired, requireRole('admin'), async (req, res) => {
     const { id } = req.params;
     const { name, email, mobile, password, role, approved } = req.body;
     const bcrypt = require('bcrypt');

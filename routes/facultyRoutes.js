@@ -6,7 +6,7 @@ const { authRequired, requireRole } = require('../middleware/authMiddleware');
 const router = express.Router();
 
 // Faculty: create student
-router.post('/user', authRequired, requireRole('faculty'), async (req, res) => {
+router.post('/users', authRequired, requireRole('faculty'), async (req, res) => {
     const facultyId = req.loggedInUser.id;
     const { name, email, mobile, password, approved } = req.body;
     const bcrypt = require('bcrypt');
@@ -51,7 +51,7 @@ router.post('/user', authRequired, requireRole('faculty'), async (req, res) => {
 
 
 // Faculty: view students they added (list)
-router.get('/user', authRequired, requireRole('faculty'), async (req, res) => {
+router.get('/users', authRequired, requireRole('faculty'), async (req, res) => {
     const facultyId = req.user.id;
     const page = parseInt(req.query.page) || 1;       // default page 1
     const limit = 100;    
@@ -101,7 +101,7 @@ router.get('/user', authRequired, requireRole('faculty'), async (req, res) => {
 
 
 // Faculty: update student info and optionally mapping
-router.put('/user/:id', authRequired, requireRole('faculty'), async (req, res) => {
+router.put('/users/:id', authRequired, requireRole('faculty'), async (req, res) => {
     const facultyId = req.loggedInUser.id;
     const { id } = req.params; // student id
     const { name, email, mobile, password, approved } = req.body;
