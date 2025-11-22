@@ -52,7 +52,7 @@ router.post('/users', authRequired, requireRole('faculty'), async (req, res) => 
 
 // Faculty: view students they added (list)
 router.get('/users', authRequired, requireRole('faculty'), async (req, res) => {
-    const facultyId = req.user.id;
+    const facultyId = req.loggedInUser.id;
     const page = parseInt(req.query.page) || 1;       // default page 1
     const limit = 100;    
     const offset = (page - 1) * limit;
@@ -142,5 +142,43 @@ router.put('/users/:id', authRequired, requireRole('faculty'), async (req, res) 
         return res.status(500).json({ message: 'Server error' });
     }
 });
+
+// Faculty: view a student by ID
+router.get('/users/:id', authRequired, requireRole('faculty'), async (req, res) => {
+    const facultyId = req.loggedInUser.id;
+    const { id } = req.params; // student id
+
+    try {
+        // Check if the student belongs to this faculty
+        const q = `
+            SELECT 
+                u.id, 
+                u.name, 
+                u.email, 
+                u.mobile, 
+                u.approved,
+                u.role_id,
+                'student' as role,
+                fs.id as mappingId,
+                fs.created_at,
+                fs.updated_at
+            FROM faculty_students fs
+            JOIN users u ON u.id = fs.student_id
+            WHERE fs.faculty_id = $1 AND fs.student_id = $2
+        `;
+
+        const result = await db.query(q, [facultyId, id]);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: 'Student not found or not assigned to you' });
+        }
+
+        return res.json({ user: result.rows[0] });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ message: 'Server error' });
+    }
+});
+
 
 module.exports = router;
