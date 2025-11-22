@@ -20,28 +20,73 @@ router.post('/approve/faculty/:facultyId', authRequired, requireRole('admin'), a
 
 // Admin: Create admin / faculty / student (full CRUD allowed for admin)
 router.post('/users', authRequired, requireRole('admin'), async (req, res) => {
-    const { name, email, mobile, password, role, approved } = req.body;
+    const { name, email, mobile, password, role, approved, facultyId } = req.body;
     const bcrypt = require('bcrypt');
     const SALT_ROUNDS = 10;
-    if (!password || !role) return res.status(400).json({ message: 'password and role required' });
+
+    if (!password || !role) {
+        return res.status(400).json({ message: 'password and role required' });
+    }
 
     try {
+        // Hash password
         const hash = await bcrypt.hash(password, SALT_ROUNDS);
+
+        // Get role id
         const roleRow = await db.query('SELECT id FROM roles WHERE name=$1', [role]);
-        if (roleRow.rowCount === 0) return res.status(400).json({ message: 'Invalid role' });
+        if (roleRow.rowCount === 0) {
+            return res.status(400).json({ message: 'Invalid role' });
+        }
         const roleId = roleRow.rows[0].id;
-        const q = `INSERT INTO users (name,email,mobile,password_hash,role_id,approved) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id,name,email,role_id,approved`;
-        const r = await db.query(q, [name, email, mobile, hash, roleId, approved]);
-        return res.status(201).json({ user: r.rows[0] });
+
+        // If role is student, facultyId is required
+        if (role.toLowerCase() === 'student') {
+            if (!facultyId) {
+                return res.status(400).json({ message: 'facultyId required for student' });
+            }
+
+            // Check if faculty exists
+            const facultyCheck = await db.query(
+                'SELECT id FROM users WHERE id=$1 AND role_id=(SELECT id FROM roles WHERE name=$2)',
+                [facultyId, 'faculty']
+            );
+            if (facultyCheck.rowCount === 0) {
+                return res.status(400).json({ message: 'Invalid facultyId' });
+            }
+        }
+
+        // Insert user
+        const insertUserQuery = `
+            INSERT INTO users (name, email, mobile, password_hash, role_id, approved)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id, name, email, role_id, approved
+        `;
+        const userResult = await db.query(insertUserQuery, [name, email, mobile, hash, roleId, approved || false]);
+        const user = userResult.rows[0];
+
+        // If student, insert into mapping table
+        if (role.toLowerCase() === 'student') {
+            await db.query(
+                'INSERT INTO faculty_students (student_id, faculty_id) VALUES ($1, $2)',
+                [user.id, facultyId]
+            );
+            user.faculty_id = facultyId; // optional: return mapping info
+        }
+
+        return res.status(201).json({ user });
+
     } catch (err) {
         console.error(err);
         return res.status(500).json({ message: 'Server error' });
     }
 });
 
+
+
+
 router.put('/users/:id', authRequired, requireRole('admin'), async (req, res) => {
     const { id } = req.params;
-    const { name, email, mobile, password, role, approved } = req.body;
+    const { name, email, mobile, password, role, approved, facultyId } = req.body;
     const bcrypt = require('bcrypt');
     const SALT_ROUNDS = 10;
 
@@ -52,10 +97,13 @@ router.put('/users/:id', authRequired, requireRole('admin'), async (req, res) =>
             return res.status(404).json({ message: 'User not found' });
         }
 
+        // Handle role update
         let roleId;
         if (role) {
             const roleRow = await db.query('SELECT id FROM roles WHERE name=$1', [role]);
-            if (roleRow.rowCount === 0) return res.status(400).json({ message: 'Invalid role' });
+            if (roleRow.rowCount === 0) {
+                return res.status(400).json({ message: 'Invalid role' });
+            }
             roleId = roleRow.rows[0].id;
         }
 
@@ -65,7 +113,7 @@ router.put('/users/:id', authRequired, requireRole('admin'), async (req, res) =>
             passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
         }
 
-        // Update query
+        // Update user fields
         const q = `
             UPDATE users
             SET name=$1,
@@ -78,14 +126,61 @@ router.put('/users/:id', authRequired, requireRole('admin'), async (req, res) =>
             RETURNING id, name, email, mobile, role_id, approved
         `;
 
-        const r = await db.query(q, [name, email, mobile, passwordHash, roleId, approved, id]);
+        const updatedUser = await db.query(q, [
+            name,
+            email,
+            mobile,
+            passwordHash,
+            roleId,
+            approved,
+            id
+        ]);
 
-        return res.json({ user: r.rows[0] });
+        // ===== Faculty Assignment Logic ===== //
+        if ((role === 'student' || existingUser.rows[0].role_id === (await db.query(`SELECT id FROM roles WHERE name='student'`)).rows[0].id)) {
+
+            if (facultyId) {
+                // validate faculty
+                const facultyCheck = await db.query(
+                    `SELECT id FROM users 
+                     WHERE id=$1 AND role_id=(SELECT id FROM roles WHERE name='faculty')`,
+                    [facultyId]
+                );
+
+                if (facultyCheck.rowCount === 0) {
+                    return res.status(400).json({ message: 'Invalid facultyId' });
+                }
+
+                // check if mapping exists
+                const mapping = await db.query(
+                    'SELECT * FROM faculty_students WHERE student_id=$1',
+                    [id]
+                );
+
+                if (mapping.rowCount === 0) {
+                    // insert new mapping
+                    await db.query(
+                        'INSERT INTO faculty_students (student_id, faculty_id) VALUES ($1,$2)',
+                        [id, facultyId]
+                    );
+                } else {
+                    // update existing mapping
+                    await db.query(
+                        'UPDATE faculty_students SET faculty_id=$1 WHERE student_id=$2',
+                        [facultyId, id]
+                    );
+                }
+            }
+        }
+
+        return res.json({ user: updatedUser.rows[0] });
+
     } catch (err) {
         console.error(err);
         return res.status(500).json({ message: 'Server error' });
     }
 });
+
 
 router.get('/users', authRequired, requireRole('admin'), async (req, res) => {
     const { page } = req.query;
@@ -112,9 +207,30 @@ router.get('/users/:id', authRequired, requireRole('admin'), async (req, res) =>
     console.log('Fetching user with id:', id);
 
     const q = `
-        SELECT u.id, u.name, u.email, u.mobile, r.name as role, r.id as roleId, u.approved
+        SELECT 
+            u.id,
+            u.name,
+            u.email,
+            u.mobile,
+            r.name AS role,
+            r.id AS roleId,
+            u.approved,
+
+            -- faculty mapping (student → faculty)
+            sf.faculty_id AS facultyId,
+            f.name AS facultyName
+
         FROM users u
         JOIN roles r ON r.id = u.role_id
+
+        -- join student → faculty map
+        LEFT JOIN faculty_students sf 
+            ON sf.student_id = u.id
+
+        -- join faculty user details
+        LEFT JOIN users f 
+            ON f.id = sf.faculty_id
+
         WHERE u.id = $1
     `;
 
@@ -132,5 +248,18 @@ router.get('/users/:id', authRequired, requireRole('admin'), async (req, res) =>
     }
 });
 
+
+router.get('/faculties', authRequired, requireRole('admin'), async (req, res) => {
+    try {
+        const result = await db.query(
+            'SELECT id, name FROM users WHERE role_id=(SELECT id FROM roles WHERE name=$1)',
+            ['faculty']
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
 
 module.exports = router;

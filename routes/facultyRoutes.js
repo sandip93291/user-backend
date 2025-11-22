@@ -40,6 +40,8 @@ router.post('/users', authRequired, requireRole('faculty'), async (req, res) => 
         `;
         const mappingResult = await db.query(qMapping, [facultyId, student.id]);
 
+        student['role'] = 'student';    
+
         return res.status(201).json({ student, mapping: mappingResult.rows[0] });
 
     } catch (err) {
@@ -54,7 +56,7 @@ router.post('/users', authRequired, requireRole('faculty'), async (req, res) => 
 router.get('/users', authRequired, requireRole('faculty'), async (req, res) => {
     const facultyId = req.loggedInUser.id;
     const page = parseInt(req.query.page) || 1;       // default page 1
-    const limit = 100;    
+    const limit = 100;
     const offset = (page - 1) * limit;
 
     try {
@@ -76,7 +78,8 @@ router.get('/users', authRequired, requireRole('faculty'), async (req, res) => {
                 u.role_id,
                 fs.id as mappingId,
                 fs.created_at,
-                fs.updated_at
+                fs.updated_at,
+                'student' as role
             FROM faculty_students fs
             JOIN users u ON u.id = fs.student_id
             WHERE fs.faculty_id = $1
